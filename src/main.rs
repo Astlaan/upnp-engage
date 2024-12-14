@@ -11,13 +11,6 @@ use std::path::Path;
 use std::process;
 use tokio::runtime::Runtime;
 
-#[cfg(windows)]
-use windows_service::service::ServiceControl;
-#[cfg(windows)]
-use windows_service::service_control_handler::register;
-#[cfg(windows)]
-use windows_service::service_control_handler::ServiceControlHandlerResult;
-
 fn get_config_path() -> io::Result<std::path::PathBuf> {
     let current_dir = env::current_dir()?;
     Ok(current_dir.join("config.toml"))
@@ -164,53 +157,34 @@ async fn main() {
     println!("");
     println!("Press Ctrl+C to terminate or close this window to terminate.");
 
-    // Setup cleanup for different termination scenarios
-    let gateway_clone = gateway.clone();
-    let router_port_clone = router_port;
+    // Handle both Ctrl+C and terminal close
+    #[cfg(unix)]
+    let mut signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("Failed to create signal handler");
 
     #[cfg(windows)]
-    let _handler = register("upnp_port_forwarder", move |control_event| {
-        let rt = Runtime::new().expect("Failed to create Tokio runtime");
-        let gw = gateway_clone.clone();
-        let port = router_port_clone;
+    let mut signal = tokio::signal::windows::ctrl_close().expect("Failed to create signal handler");
 
-        match control_event {
-            ServiceControl::Stop | ServiceControl::Shutdown => {
-                println!("\nReceived Windows termination signal");
-                rt.block_on(async {
-                    cleanup_ports(&gw, port).await;
-                });
-                process::exit(0);
-            }
-            _ => ServiceControlHandlerResult::NoError,
+    let ctrl_c = tokio::signal::ctrl_c();
+
+    // Keep the program running and handle signals
+    tokio::select! {
+        _ = async {
+            #[cfg(unix)]
+            signal.recv().await;
+            #[cfg(windows)]
+            signal.recv().await;
+        } => {
+            println!("\nReceived terminate signal");
         }
-    })
-    .expect("Failed to create Windows service handler");
-
-    #[cfg(not(windows))]
-    {
-        let mut signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("Failed to create signal handler");
-
-        tokio::select! {
-            _ = signal.recv() => {
-                println!("\nReceived terminate signal");
-            }
-            _ = tokio::signal::ctrl_c() => {
-                println!("\nReceived Ctrl+C signal");
-            }
+        _ = ctrl_c => {
+            println!("\nReceived Ctrl+C signal");
         }
-
-        cleanup_ports(&gateway, router_port).await;
+        _ = tokio::time::sleep(tokio::time::Duration::from_secs(u64::MAX)) => {
+            // This will effectively never happen, but keeps the program running
+        }
     }
 
-    #[cfg(windows)]
-    {
-        // On Windows, we just wait for Ctrl+C while the DesktopServiceControlHandler handles window close
-        tokio::signal::ctrl_c()
-            .await
-            .expect("Failed to listen for Ctrl+C");
-        println!("\nReceived Ctrl+C signal");
-        cleanup_ports(&gateway, router_port).await;
-    }
+    // Cleanup before exit
+    cleanup_ports(&gateway, router_port).await;
 }
