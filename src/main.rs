@@ -1,10 +1,11 @@
 mod config;
 
 use config::Config;
-use igd::aio::search_gateway;
+use igd::search_gateway;
 use igd::PortMappingProtocol;
 use std::env;
 use std::fs;
+use std::fs::File;
 use std::io;
 use std::net::SocketAddrV4;
 use std::path::Path;
@@ -31,21 +32,42 @@ fn prompt(config: &mut Config, path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-async fn cleanup_ports(gateway: &igd::aio::Gateway, router_port: u16) {
+// async fn cleanup_ports(gateway: &igd::aio::Gateway, router_port: u16) {
+//     // Remove TCP port mapping
+//     let _ = File::create("empty_clean.txt");
+//     match gateway
+//         .remove_port(PortMappingProtocol::TCP, router_port)
+//         .await
+//     {
+//         Ok(_) => println!("TCP port mapping removed successfully."),
+//         Err(e) => eprintln!("Failed to remove TCP port mapping: {}", e),
+//     }
+
+//     // Remove UDP port mapping
+//     match gateway
+//         .remove_port(PortMappingProtocol::UDP, router_port)
+//         .await
+//     {
+//         Ok(_) => println!("UDP port mapping removed successfully."),
+//         Err(e) => eprintln!("Failed to remove UDP port mapping: {}", e),
+//     }
+// }
+
+fn cleanup_ports(gateway: &igd::Gateway, router_port: u16) {
+    // Create or truncate the "empty_clean.txt" file
+    if let Err(e) = File::create("empty_clean.txt") {
+        eprintln!("Failed to create or truncate 'empty_clean.txt': {}", e);
+        // Depending on your requirements, you might want to return early or continue
+    }
+
     // Remove TCP port mapping
-    match gateway
-        .remove_port(PortMappingProtocol::TCP, router_port)
-        .await
-    {
+    match gateway.remove_port(PortMappingProtocol::TCP, router_port) {
         Ok(_) => println!("TCP port mapping removed successfully."),
         Err(e) => eprintln!("Failed to remove TCP port mapping: {}", e),
     }
 
     // Remove UDP port mapping
-    match gateway
-        .remove_port(PortMappingProtocol::UDP, router_port)
-        .await
-    {
+    match gateway.remove_port(PortMappingProtocol::UDP, router_port) {
         Ok(_) => println!("UDP port mapping removed successfully."),
         Err(e) => eprintln!("Failed to remove UDP port mapping: {}", e),
     }
@@ -80,7 +102,7 @@ async fn main() {
     let router_port = config.router_port.unwrap_or(config.device_port);
 
     // Discover the gateway
-    let gateway = match search_gateway(Default::default()).await {
+    let gateway = match search_gateway(Default::default()) {
         Ok(gw) => gw,
         Err(e) => {
             eprintln!("Failed to discover gateway: {}", e);
@@ -89,7 +111,7 @@ async fn main() {
     };
 
     // Get local IP
-    let local_ip = match gateway.get_external_ip().await {
+    let local_ip = match gateway.get_external_ip() {
         Ok(ip) => ip,
         Err(e) => {
             eprintln!("Failed to get external IP: {}", e);
@@ -99,16 +121,13 @@ async fn main() {
 
     // Add port mapping with a permanent lease
     // TCP Port Mapping
-    match gateway
-        .add_port(
-            igd::PortMappingProtocol::TCP,
-            config.device_port, // external port (router side)
-            SocketAddrV4::new(local_ip, config.device_port), // internal address (your machine)
-            0,                  // lease duration (0 = permanent)
-            "Rust UPnP Port Forwarder - TCP", // description
-        )
-        .await
-    {
+    match gateway.add_port(
+        igd::PortMappingProtocol::TCP,
+        config.device_port, // external port (router side)
+        SocketAddrV4::new(local_ip, config.device_port), // internal address (your machine)
+        0,                  // lease duration (0 = permanent)
+        "Rust UPnP Port Forwarder - TCP", // description
+    ) {
         Ok(_) => println!(
             "TCP Port {} forwarded to local port {} successfully.",
             router_port, config.device_port
@@ -120,16 +139,13 @@ async fn main() {
     }
 
     // UDP Port Mapping
-    match gateway
-        .add_port(
-            igd::PortMappingProtocol::UDP,
-            config.device_port, // external port (router side)
-            SocketAddrV4::new(local_ip, config.device_port), // internal address (your machine)
-            0,                  // lease duration (0 = permanent)
-            "Rust UPnP Port Forwarder - UDP", // description
-        )
-        .await
-    {
+    match gateway.add_port(
+        igd::PortMappingProtocol::UDP,
+        config.device_port, // external port (router side)
+        SocketAddrV4::new(local_ip, config.device_port), // internal address (your machine)
+        0,                  // lease duration (0 = permanent)
+        "Rust UPnP Port Forwarder - UDP", // description
+    ) {
         Ok(_) => println!(
             "UDP Port {} forwarded to local port {} successfully.",
             router_port, config.device_port
@@ -149,7 +165,7 @@ async fn main() {
         let port = router_port_clone;
 
         rt.block_on(async {
-            cleanup_ports(&gw, port).await;
+            cleanup_ports(&gw, port);
         });
     }));
 
@@ -167,24 +183,28 @@ async fn main() {
 
     let ctrl_c = tokio::signal::ctrl_c();
 
-    // Keep the program running and handle signals
+    // Test section
+    // signal.recv().await;
+    // let _ = File::create("empty_main.txt");
+    // cleanup_ports(&gateway, router_port).await;
+    // End test section
+
+    // // Keep the program running and handle signals
     tokio::select! {
-        _ = async {
-            #[cfg(unix)]
+        _ = tokio::spawn(async move {
             signal.recv().await;
-            #[cfg(windows)]
-            signal.recv().await;
-        } => {
-            println!("\nReceived terminate signal");
+        }) => {
+            let _ = File::create("empty_async_signal.txt");
+            cleanup_ports(&gateway, router_port);
         }
         _ = ctrl_c => {
-            println!("\nReceived Ctrl+C signal");
+            cleanup_ports(&gateway, router_port);
+            let _ = File::create("empty_async_ctrlc.txt");
         }
-        _ = tokio::time::sleep(tokio::time::Duration::from_secs(u64::MAX)) => {
-            // This will effectively never happen, but keeps the program running
-        }
+        // _ = tokio::time::sleep(tokio::time::Duration::from_secs(u64::MAX)) => {
+        //     // This will effectively never happen, but keeps the program running
+        // }
     }
 
     // Cleanup before exit
-    cleanup_ports(&gateway, router_port).await;
 }
