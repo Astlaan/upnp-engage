@@ -56,7 +56,6 @@ fn prompt(config: &mut Config, path: &Path) -> io::Result<()> {
 
 fn cleanup_ports(gateway: &igd::Gateway, router_port: u16) {
     // Create or truncate the "empty_clean.txt" file
-    File::create("empty_clean_1.txt");
 
     // Remove TCP port mapping
     match gateway.remove_port(PortMappingProtocol::TCP, router_port) {
@@ -69,7 +68,6 @@ fn cleanup_ports(gateway: &igd::Gateway, router_port: u16) {
         Ok(_) => println!("UDP port mapping removed successfully."),
         Err(e) => eprintln!("Failed to remove UDP port mapping: {}", e),
     }
-    File::create("empty_clean_2.txt");
 }
 
 fn open_ports(gateway: &igd::Gateway, local_ip: Ipv4Addr, device_port: u16, router_port: u16) {
@@ -169,7 +167,7 @@ async fn main() {
     println!("Port forwarding is active. External IP:");
     println!("{}:{}", external_ip, external_port);
     println!("");
-    println!("Press Ctrl+C to terminate or close this window to terminate.");
+    println!("Press Ctrl+C to terminate.");
 
     // Handle both Ctrl+C and terminal close
     #[cfg(target_family = "unix")]
@@ -195,11 +193,9 @@ async fn main() {
         _ =
             signal.recv()
          => {
-            let _ = File::create("empty_async_signal.txt");
-            cleanup_ports(&gateway, external_port);
+            cleanup_ports(&gateway, external_port); // doesn't work
         }
         _ = ctrl_c => {
-            let _ = File::create("empty_async_ctrlc.txt");
             cleanup_ports(&gateway, external_port);
         }
     }
