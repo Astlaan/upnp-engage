@@ -56,10 +56,7 @@ fn prompt(config: &mut Config, path: &Path) -> io::Result<()> {
 
 fn cleanup_ports(gateway: &igd::Gateway, router_port: u16) {
     // Create or truncate the "empty_clean.txt" file
-    if let Err(e) = File::create("empty_clean.txt") {
-        eprintln!("Failed to create or truncate 'empty_clean.txt': {}", e);
-        // Depending on your requirements, you might want to return early or continue
-    }
+    File::create("empty_clean_1.txt");
 
     // Remove TCP port mapping
     match gateway.remove_port(PortMappingProtocol::TCP, router_port) {
@@ -72,6 +69,7 @@ fn cleanup_ports(gateway: &igd::Gateway, router_port: u16) {
         Ok(_) => println!("UDP port mapping removed successfully."),
         Err(e) => eprintln!("Failed to remove UDP port mapping: {}", e),
     }
+    File::create("empty_clean_2.txt");
 }
 
 fn open_ports(gateway: &igd::Gateway, local_ip: Ipv4Addr, device_port: u16, router_port: u16) {
@@ -174,7 +172,7 @@ async fn main() {
     println!("Press Ctrl+C to terminate or close this window to terminate.");
 
     // Handle both Ctrl+C and terminal close
-    #[cfg(unix)]
+    #[cfg(target_family = "unix")]
     let mut signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .expect("Failed to create signal handler");
 
@@ -184,26 +182,26 @@ async fn main() {
     let ctrl_c = tokio::signal::ctrl_c();
 
     // Test section
+    // let _ = File::create("empty_main_1.txt");
     // signal.recv().await;
-    // let _ = File::create("empty_main.txt");
-    // cleanup_ports(&gateway, router_port).await;
+    // // let _ = File::create("empty_main_2.txt");
+    // cleanup_ports(&gateway, external_port);
+    // let _ = File::create("empty_main_3.txt");
+
     // End test section
 
-    // // Keep the program running and handle signals
+    // Keep the program running and handle signals
     tokio::select! {
-        _ = tokio::spawn(async move {
-            signal.recv().await;
-        }) => {
+        _ =
+            signal.recv()
+         => {
             let _ = File::create("empty_async_signal.txt");
             cleanup_ports(&gateway, external_port);
         }
         _ = ctrl_c => {
-            cleanup_ports(&gateway, external_port);
             let _ = File::create("empty_async_ctrlc.txt");
+            cleanup_ports(&gateway, external_port);
         }
-        // _ = tokio::time::sleep(tokio::time::Duration::from_secs(u64::MAX)) => {
-        //     // This will effectively never happen, but keeps the program running
-        // }
     }
 
     // Cleanup before exit

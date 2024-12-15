@@ -11,3 +11,6 @@ ctrlc = "*"
 tokio = { version = "1", features = ["full"] }
 signal-hook = {version = "*", features = ["iterator"]}
 windows-service = "*"
+
+[build]
+target = "x86_64-unknown-linux-gnu"
