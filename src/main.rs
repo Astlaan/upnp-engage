@@ -7,6 +7,7 @@ use std::env;
 use std::fs;
 use std::fs::File;
 use std::io;
+use std::net::Ipv4Addr;
 use std::net::SocketAddrV4;
 use std::path::Path;
 use std::process;
@@ -73,6 +74,37 @@ fn cleanup_ports(gateway: &igd::Gateway, router_port: u16) {
     }
 }
 
+fn open_ports(gateway: &igd::Gateway, local_ip: Ipv4Addr, device_port: u16, router_port: u16) {
+    match gateway.add_port(
+        igd::PortMappingProtocol::TCP,
+        router_port,                              // external port (router side)
+        SocketAddrV4::new(local_ip, device_port), // internal address (your machine)
+        0,                                        // lease duration (0 = permanent)
+        "Rust UPnP Port Forwarder - TCP",         // description
+    ) {
+        Ok(_) => println!("✓ TCP port active."),
+        Err(e) => {
+            eprintln!("Failed to add TCP port mapping: {}", e);
+            process::exit(1);
+        }
+    }
+
+    // UDP Port Mapping
+    match gateway.add_port(
+        igd::PortMappingProtocol::UDP,
+        device_port,                              // external port (router side)
+        SocketAddrV4::new(local_ip, device_port), // internal address (your machine)
+        0,                                        // lease duration (0 = permanent)
+        "Rust UPnP Port Forwarder - UDP",         // description
+    ) {
+        Ok(_) => println!("✓ UDP port active."),
+        Err(e) => {
+            eprintln!("Failed to add UDP port mapping: {}", e);
+            process::exit(1);
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let config_path = match get_config_path() {
@@ -99,7 +131,8 @@ async fn main() {
         process::exit(0);
     }
 
-    let router_port = config.router_port.unwrap_or(config.device_port);
+    let device_port = config.device_port;
+    let external_port = config.router_port.unwrap_or(config.device_port);
 
     // Discover the gateway
     let gateway = match search_gateway(Default::default()) {
@@ -111,65 +144,32 @@ async fn main() {
     };
 
     // Get local IP
-    let local_ip = match gateway.get_external_ip() {
+    let external_ip = match gateway.get_external_ip() {
         Ok(ip) => ip,
         Err(e) => {
             eprintln!("Failed to get external IP: {}", e);
             process::exit(1);
         }
     };
+    let local_ip = external_ip; // Router recognizes itself
 
     // Add port mapping with a permanent lease
     // TCP Port Mapping
-    match gateway.add_port(
-        igd::PortMappingProtocol::TCP,
-        config.device_port, // external port (router side)
-        SocketAddrV4::new(local_ip, config.device_port), // internal address (your machine)
-        0,                  // lease duration (0 = permanent)
-        "Rust UPnP Port Forwarder - TCP", // description
-    ) {
-        Ok(_) => println!(
-            "TCP Port {} forwarded to local port {} successfully.",
-            router_port, config.device_port
-        ),
-        Err(e) => {
-            eprintln!("Failed to add TCP port mapping: {}", e);
-            process::exit(1);
-        }
-    }
-
-    // UDP Port Mapping
-    match gateway.add_port(
-        igd::PortMappingProtocol::UDP,
-        config.device_port, // external port (router side)
-        SocketAddrV4::new(local_ip, config.device_port), // internal address (your machine)
-        0,                  // lease duration (0 = permanent)
-        "Rust UPnP Port Forwarder - UDP", // description
-    ) {
-        Ok(_) => println!(
-            "UDP Port {} forwarded to local port {} successfully.",
-            router_port, config.device_port
-        ),
-        Err(e) => {
-            eprintln!("Failed to add UDP port mapping: {}", e);
-            process::exit(1);
-        }
-    }
+    open_ports(&gateway, local_ip, device_port, external_port);
 
     // Setup panic handler for cleanup
+
     let gateway_clone = gateway.clone();
-    let router_port_clone = router_port;
     std::panic::set_hook(Box::new(move |_| {
         let rt = Runtime::new().expect("Failed to create Tokio runtime");
-        let gw = gateway_clone.clone();
-        let port = router_port_clone;
-
         rt.block_on(async {
-            cleanup_ports(&gw, port);
+            cleanup_ports(&gateway_clone, external_port);
         });
     }));
 
-    println!("Port forwarding is active.");
+    println!("");
+    println!("Port forwarding is active. External IP:");
+    println!("{}:{}", external_ip, external_port);
     println!("");
     println!("Press Ctrl+C to terminate or close this window to terminate.");
 
@@ -195,10 +195,10 @@ async fn main() {
             signal.recv().await;
         }) => {
             let _ = File::create("empty_async_signal.txt");
-            cleanup_ports(&gateway, router_port);
+            cleanup_ports(&gateway, external_port);
         }
         _ = ctrl_c => {
-            cleanup_ports(&gateway, router_port);
+            cleanup_ports(&gateway, external_port);
             let _ = File::create("empty_async_ctrlc.txt");
         }
         // _ = tokio::time::sleep(tokio::time::Duration::from_secs(u64::MAX)) => {
