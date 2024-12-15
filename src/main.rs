@@ -1,11 +1,13 @@
 mod config;
+mod platform{
+    pub mod windows;
+}
 
 use config::Config;
 use igd::search_gateway;
 use igd::PortMappingProtocol;
 use std::env;
 use std::fs;
-use std::fs::File;
 use std::io;
 use std::net::Ipv4Addr;
 use std::net::SocketAddrV4;
@@ -13,6 +15,7 @@ use std::path::Path;
 use std::process;
 use tokio::runtime::Runtime;
 use tokio::time::{self, Duration};
+use platform::windows::register_windows_console_ctrl_handler;
 
 const LEASE_TIME: u32 = 3600;
 const LEASE_RENEWAL_INTERVAL: u32 = 3000;
@@ -30,7 +33,7 @@ fn prompt(config: &mut Config, path: &Path) -> io::Result<()> {
         path,
         toml::to_string_pretty(&config).expect("Failed to serialize config"),
     )?;
-    println!("Config file created. Please edit it and rerun the program.");
+    println!("\nPlease edit it and rerun the program.");
     println!("Press Enter to close.");
     let mut buffer = String::new();
     io::stdin().read_line(&mut buffer)?;
@@ -57,22 +60,6 @@ fn prompt(config: &mut Config, path: &Path) -> io::Result<()> {
 //         Err(e) => eprintln!("Failed to remove UDP port mapping: {}", e),
 //     }
 // }
-
-fn cleanup_ports(gateway: &igd::Gateway, router_port: u16) {
-    // Create or truncate the "empty_clean.txt" file
-
-    // Remove TCP port mapping
-    match gateway.remove_port(PortMappingProtocol::TCP, router_port) {
-        Ok(_) => println!("TCP port mapping removed successfully."),
-        Err(e) => eprintln!("Failed to remove TCP port mapping: {}", e),
-    }
-
-    // Remove UDP port mapping
-    match gateway.remove_port(PortMappingProtocol::UDP, router_port) {
-        Ok(_) => println!("UDP port mapping removed successfully."),
-        Err(e) => eprintln!("Failed to remove UDP port mapping: {}", e),
-    }
-}
 
 async fn open_and_keep_active(
     gateway: igd::Gateway,
@@ -139,6 +126,22 @@ async fn open_and_keep_active(
     }
 }
 
+fn cleanup_ports(gateway: &igd::Gateway, router_port: u16) {
+    // Create or truncate the "empty_clean.txt" file
+
+    // Remove TCP port mapping
+    match gateway.remove_port(PortMappingProtocol::TCP, router_port) {
+        Ok(_) => println!("TCP port mapping removed successfully."),
+        Err(e) => eprintln!("Failed to remove TCP port mapping: {}", e),
+    }
+
+    // Remove UDP port mapping
+    match gateway.remove_port(PortMappingProtocol::UDP, router_port) {
+        Ok(_) => println!("UDP port mapping removed successfully."),
+        Err(e) => eprintln!("Failed to remove UDP port mapping: {}", e),
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let config_path = match get_config_path() {
@@ -195,8 +198,15 @@ async fn main() {
         });
     }));
 
+    register_windows_console_ctrl_handler(None);
+
     // Spawn the port mapping task to run in the background
-    let keep_active_handle = tokio::spawn(open_and_keep_active(gateway.clone(), local_ip, device_port, external_port));
+    let keep_active_handle = tokio::spawn(open_and_keep_active(
+        gateway.clone(),
+        local_ip,
+        device_port,
+        external_port,
+    ));
 
     println!("");
     println!("Port forwarding is active. External IP:");
@@ -205,28 +215,24 @@ async fn main() {
     println!("Press Ctrl+C to terminate.");
 
     // Handle both Ctrl+C and terminal close
-    #[cfg(target_family = "unix")]
-    let mut signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        .expect("Failed to create signal handler");
+    // #[cfg(target_family = "unix")]
+    // let mut signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+    //     .expect("Failed to create signal handler");
 
     #[cfg(windows)]
-    let mut signal = tokio::signal::windows::ctrl_close().expect("Failed to create signal handler");
+    let mut close_handler =
+        tokio::signal::windows::ctrl_close().expect("Failed to create ctrl_close signal handler");
+    #[cfg(windows)]
+    let close_signal = close_handler.recv();
 
-    let ctrl_c = tokio::signal::ctrl_c();
+    let ctrl_c_signal = tokio::signal::ctrl_c();
 
-
-    // Keep the program running and handle signals
     tokio::select! {
-        _ = signal.recv() => {
-            keep_active_handle.abort();
-            cleanup_ports(&gateway, external_port);
-        }
-        _ = ctrl_c => {
-            keep_active_handle.abort();
-            cleanup_ports(&gateway, external_port);
-        }
+        _ = close_signal  => {}
+        _ = ctrl_c_signal => {}
     }
 
     // Wait for the background task to finish (it should be aborted by now)
-    let _ = keep_active_handle.await;
+    keep_active_handle.abort();
+    cleanup_ports(&gateway, external_port);
 }
