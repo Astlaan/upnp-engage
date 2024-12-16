@@ -1,0 +1,64 @@
+name: Create Release
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      # Try to download artifacts from PR build if available
+      - name: Download PR artifacts
+        id: download
+        uses: dawidd6/action-download-artifact@v2
+        continue-on-error: true
+        with:
+          workflow: build.yml
+          workflow_conclusion: success
+          branch: ${{ github.event.pull_request.head.ref }}
+          name: build-artifacts
+          path: artifacts
+          
+      # If no artifacts found (direct push to main), build from scratch
+      - uses: actions/checkout@v3
+        if: steps.download.outcome == 'failure'
+      
+      - name: Install Rust
+        if: steps.download.outcome == 'failure'
+        uses: dtolnay/rust-toolchain@stable
+        
+      - name: Cache Rust dependencies and build outputs
+        if: steps.download.outcome == 'failure'
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+        
+      - name: Build
+        if: steps.download.outcome == 'failure'
+        run: cargo build --release
+        
+      - name: Move build artifacts
+        if: steps.download.outcome == 'failure'
+        run: |
+          mkdir artifacts
+          move target/release/*.exe artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/*.exe
+          tag_name: release-${{ github.sha }}
+          name: Release ${{ github.sha }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
