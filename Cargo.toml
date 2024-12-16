@@ -7,7 +7,6 @@ edition = "2021"
 igd = { version = "*", features = ["aio"] }
 serde = { version = "1", features = ["derive"] }
 toml = "0.5"
-ctrlc = "*"
 tokio = { version = "1", features = ["full"] }
 winapi = { version = "*", features = ["minwindef", "consoleapi"] }
 once_cell = "*"

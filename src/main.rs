@@ -18,7 +18,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use tokio::time::{self, Duration};
-use toml::to_string;
 
 const LEASE_TIME: u32 = 3600;
 const LEASE_RENEWAL_INTERVAL: u32 = 3000;
