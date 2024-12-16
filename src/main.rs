@@ -6,21 +6,23 @@ use config::Config;
 use deferred_task::DeferredTask;
 use igd::search_gateway;
 use igd::PortMappingProtocol;
+use local_ip_address;
 use platform::windows::register_windows_console_ctrl_handler;
 use std::env;
-use std::fs;
 use std::io;
 use std::net::Ipv4Addr;
 use std::net::SocketAddrV4;
-use std::path::Path;
 use std::process;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use tokio::time::{self, Duration};
+use toml::to_string;
 
 const LEASE_TIME: u32 = 3600;
 const LEASE_RENEWAL_INTERVAL: u32 = 3000;
+const CONNECTION_NAME: &str = "Rust UPnP Port Forwarder";
 
 static TASK_OPEN_AND_MAINTAIN_CONNECTION: OnceLock<Arc<Mutex<DeferredTask>>> = OnceLock::new();
 
@@ -50,12 +52,18 @@ fn get_config_path() -> io::Result<std::path::PathBuf> {
 //     }
 // }
 
-async fn open_and_keep_active(
-    gateway: igd::Gateway,
-    external_ip: Ipv4Addr,
-    device_port: u16,
-    external_port: u16,
-) {
+async fn open_and_keep_active(gateway: igd::Gateway, device_port: u16, external_port: u16) {
+    let local_ip = local_ip_address::local_ip()
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to get local IP: {}", e);
+            process::exit(1);
+        })
+        .to_string();
+    let local_ip = Ipv4Addr::from_str(&local_ip).unwrap();
+    let external_ip = gateway.get_external_ip().unwrap_or_else(|e| {
+        eprintln!("Failed to get external IP: {}", e);
+        process::exit(1);
+    });
     let renewal_interval = Duration::from_secs(LEASE_RENEWAL_INTERVAL.into());
     let mut first_run = true;
 
@@ -64,10 +72,10 @@ async fn open_and_keep_active(
         match gateway.add_port(
             igd::PortMappingProtocol::TCP,
             external_port,
-            SocketAddrV4::new(external_ip, device_port),
+            SocketAddrV4::new(local_ip, device_port),
             // external IP works, router recognizes itself
             LEASE_TIME,
-            "Rust UPnP Port Forwarder - TCP",
+            &format!("{} - TCP", CONNECTION_NAME),
         ) {
             Ok(_) => {
                 if first_run {
@@ -90,9 +98,9 @@ async fn open_and_keep_active(
         match gateway.add_port(
             igd::PortMappingProtocol::UDP,
             external_port,
-            SocketAddrV4::new(external_ip, device_port),
+            SocketAddrV4::new(local_ip, device_port),
             LEASE_TIME,
-            "Rust UPnP Port Forwarder - UDP",
+            &format!("{} - UDP", CONNECTION_NAME),
         ) {
             Ok(_) => {
                 if first_run {
@@ -113,7 +121,10 @@ async fn open_and_keep_active(
 
         if first_run {
             println!("");
-            println!("Port forwarding is active. External IP:");
+            println!("Port forwarding is active.");
+            println!("\nLocal IP:");
+            println!("{}:{}", local_ip, device_port);
+            println!("\nExternal IP:");
             println!("{}:{}", external_ip, external_port);
             println!("");
             println!("Press Ctrl+C to terminate.");
@@ -178,15 +189,6 @@ async fn main() {
         }
     };
 
-    // Get local IP
-    let external_ip = match gateway.get_external_ip() {
-        Ok(ip) => ip,
-        Err(e) => {
-            eprintln!("Failed to get external IP: {}", e);
-            process::exit(1);
-        }
-    };
-
     // register_windows_console_ctrl_handler(|| {
     //     thread::sleep(Duration::from_secs(2));
     //     keep_active_handle.abort();
@@ -200,8 +202,7 @@ async fn main() {
     //     thread::sleep(Duration::from_secs(4));
     // });
 
-    let future_connection =
-        open_and_keep_active(gateway.clone(), external_ip, device_port, external_port);
+    let future_connection = open_and_keep_active(gateway.clone(), device_port, external_port);
     let task_connection = DeferredTask::new(future_connection);
     TASK_OPEN_AND_MAINTAIN_CONNECTION
         .set(Arc::new(Mutex::new(task_connection)))
@@ -216,7 +217,6 @@ async fn main() {
     }));
     let gateway_clone = gateway.clone();
     register_windows_console_ctrl_handler(move || {
-        println!("Running handler");
         shutdown_program(gateway_clone.clone(), external_port);
     });
 
@@ -246,7 +246,6 @@ async fn main() {
     //     _ = ctrl_c_signal => {}
     // }
 
-    // Wait for the background task to finish (it should be aborted by now)
 
     // Keep the program running. Shutdown handled by the ConsoleCtrlHandler
     tokio::time::sleep(Duration::from_secs(u64::MAX)).await;

@@ -35,7 +35,6 @@ pub fn register_windows_console_ctrl_handler<F>(callback: F)
 where
     F: Fn() + Send + 'static,
 {
-    println!("Registering handler!");
     if let Ok(mut handler) = CTRL_HANDLER.lock() {
         *handler = Some(Box::new(callback));
 

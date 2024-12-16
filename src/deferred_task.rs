@@ -25,11 +25,8 @@ impl DeferredTask {
     pub fn start(&self) {
         let mut handle_lock = self.handle.lock().unwrap();
         if handle_lock.is_none() {
-            println!("Starting the task...");
             let handle = task::spawn(async {
-                println!("Task is running...");
                 time::sleep(Duration::from_secs(5)).await;
-                println!("Task completed!");
             });
             *handle_lock = Some(handle);
         }
@@ -62,7 +59,6 @@ impl DeferredTask {
             // rt.block_on(async {
             //     let _ = handle.await; // Await termination of the task
             // });
-
 
             // tokio::runtime::Handle::current().block_on(async {
             //     match handle.await {
