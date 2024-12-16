@@ -245,7 +245,6 @@ async fn main() {
     //     _ = ctrl_c_signal => {}
     // }
 
-
     // Keep the program running. Shutdown handled by the ConsoleCtrlHandler
     tokio::time::sleep(Duration::from_secs(u64::MAX)).await;
 }

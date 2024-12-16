@@ -1,34 +1,34 @@
+use core::fmt;
 use std::{
+    future::Future,
+    pin::Pin,
     sync::{Arc, Mutex},
-    time::Duration,
 };
-use tokio::{task, time};
+use tokio::task;
 
 /// Struct representing a deferred task with manual start and abort control.
-#[derive(Debug)]
 pub struct DeferredTask {
     handle: Arc<Mutex<Option<task::JoinHandle<()>>>>,
+    future: Option<Pin<Box<dyn Future<Output = ()> + Send + 'static>>>,
 }
 
 impl DeferredTask {
-    /// Create a new DeferredTask with a given future.
-    pub fn new<F>(future: F) -> Self
-    where
-        F: std::future::Future<Output = ()> + Send + 'static,
-    {
+    pub fn new(future: impl Future<Output = ()> + Send + 'static) -> Self {
         Self {
-            handle: Arc::new(Mutex::new(Some(task::spawn(future)))),
+            handle: Arc::new(Mutex::new(None)),
+            future: Some(Box::pin(future)),
         }
     }
 
     /// Start the task manually by spawning it onto the tokio runtime.
-    pub fn start(&self) {
+    pub fn start(&mut self) {
         let mut handle_lock = self.handle.lock().unwrap();
         if handle_lock.is_none() {
-            let handle = task::spawn(async {
-                time::sleep(Duration::from_secs(5)).await;
-            });
-            *handle_lock = Some(handle);
+            println!("Starting the task...");
+            if let Some(future) = self.future.take() {
+                let handle = task::spawn(future);
+                *handle_lock = Some(handle);
+            }
         }
     }
 
@@ -70,5 +70,14 @@ impl DeferredTask {
         } else {
             println!("No task to abort.");
         }
+    }
+}
+
+impl fmt::Debug for DeferredTask {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DeferredTask")
+            .field("handle", &self.handle)
+            .field("future", &"dyn Future<Output = ()>")
+            .finish()
     }
 }
