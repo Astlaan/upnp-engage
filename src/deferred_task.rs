@@ -4,6 +4,7 @@ use std::{
     pin::Pin,
     sync::{Arc, Mutex},
 };
+use tokio::runtime::Builder;
 use tokio::task;
 
 /// Struct representing a deferred task with manual start and abort control.
@@ -48,7 +49,8 @@ impl DeferredTask {
                 });
             } else {
                 // Otherwise, create a temporary runtime
-                let rt = tokio::runtime::Runtime::new().unwrap();
+                // let rt = tokio::runtime::Runtime::new().unwrap();
+                let rt = Builder::new_current_thread().build().unwrap();
                 rt.block_on(async {
                     let _ = handle.await; // Await termination of the task
                 });

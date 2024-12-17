@@ -7,7 +7,7 @@ edition = "2021"
 igd = { version = "*", features = ["aio"] }
 serde = { version = "1", features = ["derive"] }
 toml = "0.5"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["macros", "rt"] }
 winapi = { version = "*", features = ["minwindef", "consoleapi"] }
 once_cell = "*"
 local-ip-address = "*"

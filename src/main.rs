@@ -164,7 +164,8 @@ fn shutdown_program(gateway: igd::Gateway, external_port: u16) {
     cleanup_ports(gateway, external_port);
 }
 
-#[tokio::main]
+// #[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     let config_path = match get_config_path() {
         Ok(path) => path,
