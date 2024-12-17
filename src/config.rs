@@ -56,7 +56,8 @@ impl Config {
             );
 
             fs::write(path, content)?;
-            Ok(config)
+            prompt();
+            process::exit(0);
         }
     }
 
