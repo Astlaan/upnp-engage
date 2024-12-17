@@ -4,11 +4,18 @@ on:
   push:
     branches: [ main ]
 
+permissions:
+  contents: write
+
 jobs:
   release:
     runs-on: windows-latest
     steps:
-      # Try to download artifacts from PR build if available
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      # Try to download artifacts from PR build
       - name: Download PR artifacts
         id: download
         uses: dawidd6/action-download-artifact@v2
@@ -16,20 +23,26 @@ jobs:
         with:
           workflow: build.yml
           workflow_conclusion: success
-          branch: ${{ github.event.pull_request.head.ref }}
-          name: build-artifacts
+          name: build-artifacts-${{ github.sha }}
           path: artifacts
+
+      # Verify SHA matches
+      - name: Verify build SHA
+        id: verify
+        if: steps.download.outcome == 'success'
+        run: |
+          $expected_sha = Get-Content artifacts/SHA.txt
+          if ($expected_sha -ne "${{ github.sha }}") {
+            echo "SHA mismatch - need fresh build"
+            exit 1
+          }
           
-      # If no artifacts found (direct push to main), build from scratch
-      - uses: actions/checkout@v3
-        if: steps.download.outcome == 'failure'
-      
       - name: Install Rust
-        if: steps.download.outcome == 'failure'
+        if: steps.download.outcome == 'failure' || steps.verify.outcome == 'failure'
         uses: dtolnay/rust-toolchain@stable
         
       - name: Cache Rust dependencies and build outputs
-        if: steps.download.outcome == 'failure'
+        if: steps.download.outcome == 'failure' || steps.verify.outcome == 'failure'
         uses: actions/cache@v3
         with:
           path: |
@@ -43,11 +56,11 @@ jobs:
             ${{ runner.os }}-cargo-
         
       - name: Build
-        if: steps.download.outcome == 'failure'
+        if: steps.download.outcome == 'failure' || steps.verify.outcome == 'failure'
         run: cargo build --release
         
       - name: Move build artifacts
-        if: steps.download.outcome == 'failure'
+        if: steps.download.outcome == 'failure' || steps.verify.outcome == 'failure'
         run: |
           mkdir artifacts
           move target/release/*.exe artifacts/
